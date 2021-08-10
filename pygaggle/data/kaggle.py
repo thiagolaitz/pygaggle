@@ -2,6 +2,7 @@ from collections import OrderedDict, defaultdict
 from typing import List
 import json
 import logging
+import random
 
 from pydantic import BaseModel
 import scipy.special as sp
@@ -51,6 +52,7 @@ class LitReviewDataset(BaseModel):
                 for subcat in cat.sub_categories
                 for ans in subcat.answers)
 
+
     def to_senticized_dataset(self,
                               index_path: str,
                               split: str = 'nq') -> List[RelevanceExample]:
@@ -58,6 +60,9 @@ class LitReviewDataset(BaseModel):
         tokenizer = SpacySenticizer()
         example_map = OrderedDict()
         rel_map = OrderedDict()
+
+        len_doc = []
+        len_sents = []
         for query, document in self.query_answer_pairs(split=split):
             if document.id == MISSING_ID:
                 logging.warning(f'Skipping {document.title} (missing ID)')
@@ -70,10 +75,43 @@ class LitReviewDataset(BaseModel):
                 logging.warning(f'Skipping {document.id} ({e})')
                 continue
             sents = example_map[key]
+
+            len_doc.append(len(sents))
+            sents_len = list(len(k) for k in sents)
+            len_sents.append(np.mean(sents_len))  
+
+            '''sents_3 = []
+            if (len(sents) > 2):
+                for s in range(len(sents)-2):
+                    sents_3.append(' '.join([sents[s], sents[s+1], sents[s+2]]))
+                sents_3.append(' '.join([sents[-2], sents[-1]]))
+                sents_3.append(' '.join([sents[-1]]))
+            elif (len(sents) == 2):
+                sents_3.append(' '.join([sents[0], sents[1]]))
+                sents_3.append(' '.join([sents[-2], sents[-1]]))
+            else:
+                sents_3 = sents'''
+
+            '''sents_3 = []
+            if (len(sents) > 2):
+                sents_3.append(' '.join([sents[0], sents[1]]))
+                for s in range(len(sents)-2):
+                    sents_3.append(' '.join([sents[s], sents[s+1], sents[s+2]]))
+                sents_3.append(' '.join([sents[-2], sents[-1]]))
+            elif (len(sents) > 1):
+                sents_3.append(' '.join([sents[0], sents[1]]))
+                sents_3.append(' '.join([sents[-2], sents[-1]]))
+            else:
+                sents_3 = sents'''
+
             rel_map.setdefault(key, [False] * len(sents))
             for idx, s in enumerate(sents):
                 if document.exact_answer in s:
                     rel_map[key][idx] = True
+            
+            #example_map[key] = sents_3
+        print(np.mean(len_doc))
+        print(np.mean(len_sents))
         mean_stats = defaultdict(list)
         for (_, doc_id), rels in rel_map.items():
             int_rels = np.array(list(map(int, rels)))
@@ -92,6 +130,7 @@ class LitReviewDataset(BaseModel):
                 logging.warning(f'{doc_id} has no relevant answers')
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
+        
         return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
                 dict(docid=docid)), sents)), rels)
                 for ((query, docid), sents), (_, rels) in

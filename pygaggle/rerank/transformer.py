@@ -1,6 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
-from itertools import permutations
+from itertools import combinations, permutations
 from typing import List
 
 from transformers import (AutoTokenizer,
@@ -9,7 +9,7 @@ from transformers import (AutoTokenizer,
                           PreTrainedTokenizer,
                           T5ForConditionalGeneration)
 import torch
-from sentence_transformers import CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer, util
 from .base import Reranker, Query, Text
 from .similarity import SimilarityMatrixProvider
 from pygaggle.model import (BatchTokenizer,
@@ -79,12 +79,108 @@ class MonoT5(Reranker):
 
         return texts
 
+class PTT5(Reranker):
+    def __init__(self,
+                 model: T5ForConditionalGeneration = None,
+                 tokenizer: QueryDocumentBatchTokenizer = None,
+                 use_amp = False):
+        self.model = model or self.get_model()
+        self.tokenizer = tokenizer or self.get_tokenizer()
+        self.device = next(self.model.parameters(), None).device
+        self.use_amp = use_amp
+
+    @staticmethod
+    def get_model(pretrained_model_name_or_path: str = 'castorini/monot5-base-msmarco',
+                  *args, device: str = None, **kwargs) -> T5ForConditionalGeneration:
+        device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(device)
+        return T5ForConditionalGeneration.from_pretrained(pretrained_model_name_or_path,
+                                                          *args, **kwargs).to(device).eval()
+
+    @staticmethod
+    def get_tokenizer(pretrained_model_name_or_path,
+                      *args, batch_size: int = 8, **kwargs) -> T5BatchTokenizer:
+        return T5BatchTokenizer(
+            AutoTokenizer.from_pretrained(pretrained_model_name_or_path, use_fast=False, *args, **kwargs),
+            batch_size=batch_size
+        )
+
+    def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
+        texts = deepcopy(texts)
+        batch_input = QueryDocumentBatch(query=query, documents=texts)
+        for batch in self.tokenizer.traverse_query_document(batch_input):
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                input_ids = batch.output['input_ids'].to(self.device)
+                attn_mask = batch.output['attention_mask'].to(self.device)
+                _, batch_scores = greedy_decode(self.model,
+                                                input_ids,
+                                                length=1,
+                                                attention_mask=attn_mask,
+                                                return_last_logits=True)
+
+                # 47 and 2593 are the indexes of the tokens no and yes in PTTT5.
+                batch_scores = batch_scores[:, [47, 2593]]
+                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+                batch_log_probs = batch_scores[:, 1].tolist()
+            for doc, score in zip(batch.documents, batch_log_probs):
+                doc.score = score
+
+        return texts
+
+class MT5(Reranker):
+    def __init__(self,
+                 model: T5ForConditionalGeneration = None,
+                 tokenizer: QueryDocumentBatchTokenizer = None,
+                 use_amp = False):
+        self.model = model or self.get_model()
+        self.tokenizer = tokenizer or self.get_tokenizer()
+        self.device = next(self.model.parameters(), None).device
+        self.use_amp = use_amp
+
+    @staticmethod
+    def get_model(pretrained_model_name_or_path: str = 'unicamp-dl/mt5-base-multi-msmarco',
+                  *args, device: str = None, **kwargs) -> T5ForConditionalGeneration:
+        device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(device)
+        return T5ForConditionalGeneration.from_pretrained(pretrained_model_name_or_path,
+                                                          *args, **kwargs).to(device).eval()
+
+    @staticmethod
+    def get_tokenizer(pretrained_model_name_or_path,
+                      *args, batch_size: int = 8, **kwargs) -> T5BatchTokenizer:
+        return T5BatchTokenizer(
+            AutoTokenizer.from_pretrained(pretrained_model_name_or_path, use_fast=False, *args, **kwargs),
+            batch_size=batch_size
+        )
+
+    def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
+        texts = deepcopy(texts)
+        batch_input = QueryDocumentBatch(query=query, documents=texts)
+        for batch in self.tokenizer.traverse_query_document(batch_input):
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                input_ids = batch.output['input_ids'].to(self.device)
+                attn_mask = batch.output['attention_mask'].to(self.device)
+                _, batch_scores = greedy_decode(self.model,
+                                                input_ids,
+                                                length=1,
+                                                attention_mask=attn_mask,
+                                                return_last_logits=True)
+
+                # 259 and 6274 are the indexes of the tokens false and true in T5.
+                batch_scores = batch_scores[:, [259, 6274]]
+                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+                batch_log_probs = batch_scores[:, 1].tolist()
+            for doc, score in zip(batch.documents, batch_log_probs):
+                doc.score = score
+
+        return texts
+
 
 class DuoT5(Reranker):
     def __init__(self,
                  model: T5ForConditionalGeneration = None,
                  tokenizer: QueryDocumentBatchTokenizer = None,
-                 use_amp = False):
+                 use_amp = True):
         self.model = model or self.get_model()
         self.tokenizer = tokenizer or self.get_tokenizer()
         self.device = next(self.model.parameters(), None).device
@@ -107,8 +203,10 @@ class DuoT5(Reranker):
         )
 
     def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
-        texts = deepcopy(texts)
-        doc_pairs = list(permutations(texts, 2))
+        texts = deepcopy(texts)#truncar em 50 ou 100 char
+        for k in range(len(texts)):
+            texts[k].text = texts[k].text[:150]
+        doc_pairs = list(permutations(texts, 2))#ordenar por tamanho menor -> maior / mudar para arranjo
         scores = defaultdict(float)
         batch_input = DuoQueryDocumentBatch(query=query, doc_pairs=doc_pairs)
         for batch in self.tokenizer.traverse_duo_query_document(batch_input):
@@ -275,12 +373,48 @@ class SentenceTransformersReranker(Reranker):
     def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
         texts = deepcopy(texts)
         with torch.cuda.amp.autocast(enabled=self.use_amp):
-            scores = self.model.predict(
+            scores1 = self.model.predict(
                 [(query.text, text.text) for text in texts],
                 show_progress_bar=False,
             )
 
-        for (text, score) in zip(texts, scores):
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            scores2 = self.model.predict(
+                [(text.text, query.text) for text in texts],
+                show_progress_bar=False,
+            )
+
+        assert len(texts) == len(scores1) == len(scores2)
+        
+        for (text, score, score2) in zip(texts, scores1, scores2):
+            if (score.item() > score2.item()):
+                text.score = score.item()
+            else:
+                text.score = score2.item()
+
+        return texts
+
+class SentenceTransformersBiEncoder(Reranker):
+    def __init__(self,
+                 pretrained_model_name_or_path,
+                 device=None,
+                 use_amp=False):
+        device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.use_amp = use_amp
+        self.model = SentenceTransformer(
+            pretrained_model_name_or_path, device=device
+        )
+
+    def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
+        texts = deepcopy(texts)
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            embeddings1 = self.model.encode([query.text], convert_to_tensor=True, show_progress_bar=False)
+            embeddings2 = self.model.encode([text.text for text in texts], convert_to_tensor=True, show_progress_bar=False)
+            scores = util.pytorch_cos_sim(embeddings1, embeddings2)
+        
+        assert len(texts) == len(scores[0]), "Different shapes between texts and scores."
+
+        for (text, score) in zip(texts, scores[0]):
             text.score = score.item()
 
         return texts

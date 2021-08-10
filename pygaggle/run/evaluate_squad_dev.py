@@ -2,7 +2,6 @@ from typing import Optional, List
 from pathlib import Path
 import logging
 
-import numpy as np
 import time
 import random
 
@@ -34,7 +33,7 @@ from pygaggle.rerank.similarity import CosineSimilarityMatrixProvider
 from pygaggle.model import (RerankerEvaluator,
                             SimpleBatchTokenizer,
                             metric_names)
-from pygaggle.data import LitReviewDataset
+from pygaggle.data import SquadDataset
 from pygaggle.settings import Cord19Settings
 
 
@@ -43,7 +42,7 @@ METHOD_CHOICES = ('transformer', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 
                   'qa_transformer', 'random')
 
 
-class KaggleEvaluationOptions(BaseModel):
+class SquadEvaluationOptions(BaseModel):
     dataset: Path
     index_dir: Path
     method: str
@@ -76,35 +75,35 @@ class KaggleEvaluationOptions(BaseModel):
         return v
 
 
-def construct_t5(options: KaggleEvaluationOptions) -> Reranker:
+def construct_t5(options: SquadEvaluationOptions) -> Reranker:
     model = MonoT5.get_model(options.model,
                              device=options.device)
     tokenizer = MonoT5.get_tokenizer(options.model, batch_size=options.batch_size)
     return MonoT5(model, tokenizer)
 
 
-def construct_duot5(options: KaggleEvaluationOptions) -> Reranker:
+def construct_duot5(options: SquadEvaluationOptions) -> Reranker:
     model = DuoT5.get_model(options.model,
                              device=options.device)
     tokenizer = DuoT5.get_tokenizer('t5-base' , batch_size=options.batch_size)
     return DuoT5(model, tokenizer)
 
 
-def construct_mt5(options: KaggleEvaluationOptions) -> Reranker:
+def construct_mt5(options: SquadEvaluationOptions) -> Reranker:
     model = MT5.get_model(options.model,
                              device=options.device)
     tokenizer = MT5.get_tokenizer(options.model, batch_size=options.batch_size)
     return MT5(model, tokenizer)
 
 
-def construct_ptt5(options: KaggleEvaluationOptions) -> Reranker:
+def construct_ptt5(options: SquadEvaluationOptions) -> Reranker:
     model = PTT5.get_model(options.model,
                              device=options.device)
     tokenizer = PTT5.get_tokenizer(options.model, batch_size=options.batch_size)
     return PTT5(model, tokenizer)
 
 
-def construct_transformer(options: KaggleEvaluationOptions) -> Reranker:
+def construct_transformer(options: SquadEvaluationOptions) -> Reranker:
     device = torch.device(options.device)
     try:
         model = AutoModel.from_pretrained(options.model).to(device).eval()
@@ -120,7 +119,7 @@ def construct_transformer(options: KaggleEvaluationOptions) -> Reranker:
 
 
 def construct_seq_class_transformer(options:
-                                    KaggleEvaluationOptions) -> Reranker:
+                                    SquadEvaluationOptions) -> Reranker:
     try:
         model = MonoBERT.get_model(options.model, device=options.device)
     except OSError:
@@ -146,7 +145,7 @@ def construct_seq_class_transformer(options:
     return MonoBERT(model, tokenizer)
     
 
-def construct_qa_transformer(options: KaggleEvaluationOptions) -> Reranker:
+def construct_qa_transformer(options: SquadEvaluationOptions) -> Reranker:
     # We load a sequence classification model first -- again, as a workaround.
     # Refactor
     try:
@@ -164,21 +163,21 @@ def construct_qa_transformer(options: KaggleEvaluationOptions) -> Reranker:
     return QuestionAnsweringTransformerReranker(model, tokenizer)
 
 
-def construct_minilm(options: KaggleEvaluationOptions) -> Reranker:
+def construct_minilm(options: SquadEvaluationOptions) -> Reranker:
     if options.model:
         return SentenceTransformersReranker(options.model, use_amp=True)
     else:
         return SentenceTransformersReranker(use_amp=True)
 
 
-def construct_biencoder(options: KaggleEvaluationOptions) -> Reranker:
+def construct_biencoder(options: SquadEvaluationOptions) -> Reranker:
     if options.model:
         return SentenceTransformersBiEncoder(options.model, use_amp=True)
     else:
         return SentenceTransformersBiEncoder(use_amp=True)
 
 
-def construct_bm25(options: KaggleEvaluationOptions) -> Reranker:
+def construct_bm25(options: SquadEvaluationOptions) -> Reranker:
     return Bm25Reranker(index_path=str(options.index_dir))
 
 
@@ -205,12 +204,10 @@ def main():
                      choices=metric_names()),
                  opt('--model-type', type=str))
     args = apb.parser.parse_args()
-    options = KaggleEvaluationOptions(**vars(args))
-    ds = LitReviewDataset.from_file(str(options.dataset))
+    options = SquadEvaluationOptions(**vars(args))
+    ds = SquadDataset.from_file(str(options.dataset))
     examples = ds.to_senticized_dataset(str(options.index_dir),
                                         split=options.split)
-
-    print(examples)
 
     construct_map = dict(transformer=construct_transformer,
                          bm25=construct_bm25,
@@ -225,16 +222,11 @@ def main():
                          random=lambda _: RandomReranker())
     reranker = construct_map[options.method](options)
     
-    time_list = []
-    for t in range(50):
-        index = random.randint(0,len(examples)-1)
-        examples_random = list(random.sample(examples[index].documents, 30) for k in range(10))
-        time1 = time.perf_counter()
-        texts = list(reranker.rescore(examples[index].query, examples_random[k]) for k in range(10))
-        time2 = time.perf_counter()
-        time_list.append((time2 - time1)/10)
-    print(np.mean(time_list))
-
+    '''examples_random = list(random.sample(examples[0].documents, 30) for k in range(10))
+    time1 = time.perf_counter()
+    texts = list(reranker.rescore(examples[0].query, examples_random[k]) for k in range(10))
+    time2 = time.perf_counter()
+    print((time2 - time1)/10)'''
 
     evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
