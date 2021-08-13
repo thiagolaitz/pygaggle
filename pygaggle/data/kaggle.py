@@ -52,7 +52,6 @@ class LitReviewDataset(BaseModel):
                 for subcat in cat.sub_categories
                 for ans in subcat.answers)
 
-
     def to_senticized_dataset(self,
                               index_path: str,
                               split: str = 'nq') -> List[RelevanceExample]:
@@ -61,8 +60,8 @@ class LitReviewDataset(BaseModel):
         example_map = OrderedDict()
         rel_map = OrderedDict()
 
-        len_doc = []
-        len_sents = []
+        #len_doc = []
+        #len_sents = []
         for query, document in self.query_answer_pairs(split=split):
             if document.id == MISSING_ID:
                 logging.warning(f'Skipping {document.title} (missing ID)')
@@ -75,10 +74,10 @@ class LitReviewDataset(BaseModel):
                 logging.warning(f'Skipping {document.id} ({e})')
                 continue
             sents = example_map[key]
-
-            len_doc.append(len(sents))
+            
+            '''len_doc.append(len(sents))
             sents_len = list(len(k) for k in sents)
-            len_sents.append(np.mean(sents_len))  
+            len_sents.append(np.mean(sents_len))  '''
 
             '''sents_3 = []
             if (len(sents) > 2):
@@ -110,8 +109,8 @@ class LitReviewDataset(BaseModel):
                     rel_map[key][idx] = True
             
             #example_map[key] = sents_3
-        print(np.mean(len_doc))
-        print(np.mean(len_sents))
+        '''print(np.mean(len_doc))
+        print(np.mean(len_sents))'''
         mean_stats = defaultdict(list)
         for (_, doc_id), rels in rel_map.items():
             int_rels = np.array(list(map(int, rels)))
@@ -130,7 +129,8 @@ class LitReviewDataset(BaseModel):
                 logging.warning(f'{doc_id} has no relevant answers')
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
-        
+
+
         return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
                 dict(docid=docid)), sents)), rels)
                 for ((query, docid), sents), (_, rels) in

@@ -164,13 +164,33 @@ class RerankerEvaluator:
     def evaluate(self,
                  examples: List[RelevanceExample]) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
+
+        acc = 0
+        total = 0
         for example in tqdm(examples, disable=not self.use_tqdm):
             scores = [x.score for x in self.reranker.rescore(example.query,
                                                              example.documents)]
+            
+            true_list = []
+            for k in range(len(example.labels)):
+                if example.labels[k] == True:
+                    true_list.append(k)
+            idx_score = np.argmax(scores)
+
+            #Precision
+            if (idx_score in true_list):
+                acc += 1
+
+            total += 1
+
             if self.writer is not None:
                 self.writer.write(scores, example)
             for metric in metrics:
                 metric.accumulate(scores, example)
+
+        print("Precision", acc/total)
+        print("Mrr", )
+
         return metrics
 
     def evaluate_by_segments(self,

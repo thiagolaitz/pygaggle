@@ -5,6 +5,7 @@ import logging
 import numpy as np
 import time
 import random
+from tqdm import tqdm
 
 from pydantic import BaseModel, validator
 from transformers import (
@@ -28,6 +29,7 @@ from pygaggle.rerank.transformer import (
     UnsupervisedTransformerReranker,
     SentenceTransformersReranker,
     SentenceTransformersBiEncoder,
+    MT5_EN_PT
     )
 from pygaggle.rerank.random import RandomReranker
 from pygaggle.rerank.similarity import CosineSimilarityMatrixProvider
@@ -39,7 +41,7 @@ from pygaggle.settings import Cord19Settings
 
 
 SETTINGS = Cord19Settings()
-METHOD_CHOICES = ('transformer', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
+METHOD_CHOICES = ('transformer', 'mt5_en_pt', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
                   'qa_transformer', 'random')
 
 
@@ -95,6 +97,13 @@ def construct_mt5(options: KaggleEvaluationOptions) -> Reranker:
                              device=options.device)
     tokenizer = MT5.get_tokenizer(options.model, batch_size=options.batch_size)
     return MT5(model, tokenizer)
+
+
+def construct_mt5_en_pt(options: KaggleEvaluationOptions) -> Reranker:
+    model = MT5_EN_PT.get_model(options.model,
+                             device=options.device)
+    tokenizer = MT5_EN_PT.get_tokenizer(options.model, batch_size=options.batch_size)
+    return MT5_EN_PT(model, tokenizer)
 
 
 def construct_ptt5(options: KaggleEvaluationOptions) -> Reranker:
@@ -210,7 +219,6 @@ def main():
     examples = ds.to_senticized_dataset(str(options.index_dir),
                                         split=options.split)
 
-    print(examples)
 
     construct_map = dict(transformer=construct_transformer,
                          bm25=construct_bm25,
@@ -222,18 +230,17 @@ def main():
                          duot5 = construct_duot5,
                          mt5 = construct_mt5,
                          ptt5 = construct_ptt5,
+                         mt5_en_pt = construct_mt5_en_pt,
                          random=lambda _: RandomReranker())
     reranker = construct_map[options.method](options)
     
     time_list = []
-    for t in range(50):
-        index = random.randint(0,len(examples)-1)
-        examples_random = list(random.sample(examples[index].documents, 30) for k in range(10))
+    for t in tqdm(range(10)):
         time1 = time.perf_counter()
-        texts = list(reranker.rescore(examples[index].query, examples_random[k]) for k in range(10))
+        texts = list(reranker.rescore(examples[k].query, examples[k].documents) for k in range(10))
         time2 = time.perf_counter()
         time_list.append((time2 - time1)/10)
-    print(np.mean(time_list))
+    print("latency", np.mean(time_list))
 
 
     evaluator = RerankerEvaluator(reranker, options.metrics)

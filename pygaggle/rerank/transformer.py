@@ -176,6 +176,55 @@ class MT5(Reranker):
         return texts
 
 
+class MT5_EN_PT(Reranker):
+    def __init__(self,
+                 model: T5ForConditionalGeneration = None,
+                 tokenizer: QueryDocumentBatchTokenizer = None,
+                 use_amp = False):
+        self.model = model or self.get_model()
+        self.tokenizer = tokenizer or self.get_tokenizer()
+        self.device = next(self.model.parameters(), None).device
+        self.use_amp = use_amp
+
+    @staticmethod
+    def get_model(pretrained_model_name_or_path: str = 'unicamp-dl/mt5-base-en-pt-msmarco',
+                  *args, device: str = None, **kwargs) -> T5ForConditionalGeneration:
+        device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(device)
+        return T5ForConditionalGeneration.from_pretrained(pretrained_model_name_or_path,
+                                                          *args, **kwargs).to(device).eval()
+
+    @staticmethod
+    def get_tokenizer(pretrained_model_name_or_path,
+                      *args, batch_size: int = 8, **kwargs) -> T5BatchTokenizer:
+        return T5BatchTokenizer(
+            AutoTokenizer.from_pretrained(pretrained_model_name_or_path, use_fast=False, *args, **kwargs),
+            batch_size=batch_size
+        )
+
+    def rescore(self, query: Query, texts: List[Text]) -> List[Text]:
+        texts = deepcopy(texts)
+        batch_input = QueryDocumentBatch(query=query, documents=texts)
+        for batch in self.tokenizer.traverse_query_document(batch_input):
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                input_ids = batch.output['input_ids'].to(self.device)
+                attn_mask = batch.output['attention_mask'].to(self.device)
+                _, batch_scores = greedy_decode(self.model,
+                                                input_ids,
+                                                length=1,
+                                                attention_mask=attn_mask,
+                                                return_last_logits=True)
+
+                # 259 and 6274 are the indexes of the tokens false and true in T5.
+                batch_scores = batch_scores[:, [375, 36339]]
+                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+                batch_log_probs = batch_scores[:, 1].tolist()
+            for doc, score in zip(batch.documents, batch_log_probs):
+                doc.score = score
+
+        return texts
+
+
 class DuoT5(Reranker):
     def __init__(self,
                  model: T5ForConditionalGeneration = None,

@@ -2,9 +2,6 @@ from typing import Optional, List
 from pathlib import Path
 import logging
 
-import time
-import random
-
 from pydantic import BaseModel, validator
 from transformers import (
                           AutoModel,
@@ -27,6 +24,7 @@ from pygaggle.rerank.transformer import (
     UnsupervisedTransformerReranker,
     SentenceTransformersReranker,
     SentenceTransformersBiEncoder,
+    MT5_EN_PT
     )
 from pygaggle.rerank.random import RandomReranker
 from pygaggle.rerank.similarity import CosineSimilarityMatrixProvider
@@ -38,13 +36,12 @@ from pygaggle.settings import Cord19Settings
 
 
 SETTINGS = Cord19Settings()
-METHOD_CHOICES = ('transformer', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
+METHOD_CHOICES = ('transformer', 'mt5_en_pt', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
                   'qa_transformer', 'random')
 
 
 class SquadEvaluationOptions(BaseModel):
     dataset: Path
-    index_dir: Path
     method: str
     batch_size: int
     device: str
@@ -73,7 +70,6 @@ class SquadEvaluationOptions(BaseModel):
         if v is None:
             return values['model']
         return v
-
 
 def construct_t5(options: SquadEvaluationOptions) -> Reranker:
     model = MonoT5.get_model(options.model,
@@ -162,6 +158,11 @@ def construct_qa_transformer(options: SquadEvaluationOptions) -> Reranker:
                     use_fast=False)
     return QuestionAnsweringTransformerReranker(model, tokenizer)
 
+def construct_mt5_en_pt(options: SquadEvaluationOptions) -> Reranker:
+    model = MT5_EN_PT.get_model(options.model,
+                             device=options.device)
+    tokenizer = MT5_EN_PT.get_tokenizer(options.model, batch_size=options.batch_size)
+    return MT5_EN_PT(model, tokenizer)
 
 def construct_minilm(options: SquadEvaluationOptions) -> Reranker:
     if options.model:
@@ -177,14 +178,9 @@ def construct_biencoder(options: SquadEvaluationOptions) -> Reranker:
         return SentenceTransformersBiEncoder(use_amp=True)
 
 
-def construct_bm25(options: SquadEvaluationOptions) -> Reranker:
-    return Bm25Reranker(index_path=str(options.index_dir))
-
-
 def main():
     apb = ArgumentParserBuilder()
     apb.add_opts(opt('--dataset', type=Path, required=True),
-                 opt('--index-dir', type=Path, required=True),
                  opt('--method',
                      required=True,
                      type=str,
@@ -206,11 +202,9 @@ def main():
     args = apb.parser.parse_args()
     options = SquadEvaluationOptions(**vars(args))
     ds = SquadDataset.from_file(str(options.dataset))
-    examples = ds.to_senticized_dataset(str(options.index_dir),
-                                        split=options.split)
+    examples = ds.to_senticized_dataset()
 
     construct_map = dict(transformer=construct_transformer,
-                         bm25=construct_bm25,
                          t5=construct_t5,
                          seq_class_transformer=construct_seq_class_transformer,
                          qa_transformer=construct_qa_transformer,
@@ -218,16 +212,11 @@ def main():
                          biencoder = construct_biencoder,
                          duot5 = construct_duot5,
                          mt5 = construct_mt5,
+                         mt5_en_pt = construct_mt5_en_pt,
                          ptt5 = construct_ptt5,
                          random=lambda _: RandomReranker())
     reranker = construct_map[options.method](options)
     
-    '''examples_random = list(random.sample(examples[0].documents, 30) for k in range(10))
-    time1 = time.perf_counter()
-    texts = list(reranker.rescore(examples[0].query, examples_random[k]) for k in range(10))
-    time2 = time.perf_counter()
-    print((time2 - time1)/10)'''
-
     evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
     stdout = []
