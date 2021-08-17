@@ -7,3 +7,4 @@ from .relevance import *
 from .msmarco import *
 from .trec_covid import *
 from .squad import *
+from .nq_dev import *

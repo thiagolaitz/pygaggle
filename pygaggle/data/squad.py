@@ -48,6 +48,7 @@ class SquadDataset(BaseModel):
     @classmethod
     def from_file(cls, filename: str) -> 'SquadDataset':
         with open(filename, encoding='utf-8') as f:
+            print(type(json.load(f)))
             return cls(**json.load(f))
 
     def query_answer(self):
