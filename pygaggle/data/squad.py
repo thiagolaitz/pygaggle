@@ -63,7 +63,8 @@ class SquadDataset(BaseModel):
         tokenizer = SpacySenticizer()
         example_map = OrderedDict()
         rel_map = OrderedDict()
-
+        
+        count = 0
         for query, answers, context, id in self.query_answer():
             key = (query, id)
             answer_check = False
@@ -88,7 +89,6 @@ class SquadDataset(BaseModel):
                 rel_map.pop(key)
                 example_map.pop(key)
                 logging.warning(f'Skipping {id} (answer error)')
-
 
         mean_stats = defaultdict(list)
         for (_, doc_id), rels in rel_map.items():

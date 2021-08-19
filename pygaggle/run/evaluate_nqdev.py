@@ -203,8 +203,7 @@ def main():
                  opt('--model-type', type=str))
     args = apb.parser.parse_args()
     options = NQEvaluationOptions(**vars(args))
-    ds = NQDevDataset.from_file(str(options.dataset),5)
-    print('carregado')
+    ds = NQDevDataset.from_file(str(options.dataset),2100)
     examples = ds.to_senticized_dataset()
 
     construct_map = dict(transformer=construct_transformer,

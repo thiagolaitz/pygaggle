@@ -66,6 +66,7 @@ class TopkMixin(TruncatingMixin):
                           key=lambda x: x[1], reverse=True)[self.top_k:]
         scores = np.array(scores)
         scores[[x[0] for x in rel_idxs]] = -1
+        print(rel_idxs)
         return scores
 
 
@@ -74,7 +75,12 @@ class DynamicThresholdingMixin(TruncatingMixin):
 
     def truncated_rels(self, scores: List[float]) -> np.ndarray:
         scores = np.array(scores)
-        scores[scores < self.threshold * np.max(scores)] = 0
+        scores[scores < self.threshold * np.max(scores)] = -1#0
+        #--------------
+        rel_idxs = sorted(list(enumerate(scores)),
+                          key=lambda x: x[1], reverse=True)[2:]
+        scores = np.array(scores)
+        scores[[x[0] for x in rel_idxs]] = -1
         return scores
 
 
@@ -99,10 +105,14 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         if sum_score > 0:
             self.scores.append((score_rels & gold_rels).sum() / sum_score)
 
-
 @register_metric('precision@1')
 class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
     top_k = 1
+
+
+@register_metric('precision@2')
+class PrecisionAt2Metric(DynamicThresholdingMixin, PrecisionAccumulator):
+    threshold = 0.5
 
 
 @register_metric('recall@3')
@@ -165,31 +175,13 @@ class RerankerEvaluator:
                  examples: List[RelevanceExample]) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
 
-        acc = 0
-        total = 0
         for example in tqdm(examples, disable=not self.use_tqdm):
             scores = [x.score for x in self.reranker.rescore(example.query,
                                                              example.documents)]
-            
-            true_list = []
-            for k in range(len(example.labels)):
-                if example.labels[k] == True:
-                    true_list.append(k)
-            idx_score = np.argmax(scores)
-
-            #Precision
-            if (idx_score in true_list):
-                acc += 1
-
-            total += 1
-
             if self.writer is not None:
                 self.writer.write(scores, example)
             for metric in metrics:
                 metric.accumulate(scores, example)
-
-        print("Precision", acc/total)
-        print("Mrr", )
 
         return metrics
 

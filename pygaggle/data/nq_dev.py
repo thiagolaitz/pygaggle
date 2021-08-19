@@ -86,8 +86,6 @@ def simplify_nq_example(nq_example):
   return simplified_nq_example
 
 
-
-
 class ShortAnswers(BaseModel):
     end_token: int
     start_token: int
@@ -129,22 +127,20 @@ class NQDevDataset(BaseModel):
         count = 0
         with jsonlines.open(filename) as f:
             for line in f.iter():
-                data_aux = simplify_nq_example(line)
-                data_str = data_str + json.dumps(data_aux)
-                count += 1
-                if (count == 5):
-                    break
-                else:
-                  data_str = data_str + ","
+                  data_aux = simplify_nq_example(line)
+                  data_str = data_str + json.dumps(data_aux)
+                  count += 1
+                  if (count == ndocs):
+                      break
+                  else:
+                    data_str = data_str + ","
         data_str = "{\"data\":["+data_str+"]}"
         data_str = json.loads(data_str)
         return cls(**(data_str))
 
     def query_answer(self):
-        return ((nqdata.question_text, short_answer, nqdata.document_text, nqdata.example_id)
-                for nqdata in self.data
-                for annotations in nqdata.annotations
-                for short_answer in annotations.short_answers         
+        return ((nqdata.question_text, nqdata.annotations, nqdata.document_text, nqdata.example_id)
+                for nqdata in self.data         
                 )
 
     def to_senticized_dataset(self
@@ -153,9 +149,14 @@ class NQDevDataset(BaseModel):
         example_map = OrderedDict()
         rel_map = OrderedDict()
 
-        for query, answers, context, id in self.query_answer():
+        countans = 0
+        count1 = 0
+        for query, annotations, context, id in self.query_answer():
             key = (query, id)
-            answer_check = False
+            context_split = context.split(' ')
+
+            if (len(context_split) > 15000):
+              continue
 
             try:
                 example_map.setdefault(key, tokenizer(context))
@@ -163,21 +164,54 @@ class NQDevDataset(BaseModel):
                 logging.warning(f'Skipping {id} ({e})')
                 continue
             sents = example_map[key]
+
             rel_map.setdefault(key, [False] * len(sents))
-            
-            total_len = 0
-            for idx, s in enumerate(sents):
-                for a in answers:
-                    if (a.answer_start >= total_len and a.answer_start <= total_len+len(s)):
+
+            answer_check = False
+            for a in annotations:
+              for short in a.short_answers:
+                start = 0
+                for idx,k in enumerate(context_split):
+                  if idx == short.start_token:
+                    break
+                  start += len(k)
+
+                total_len = 0
+                for idx, s in enumerate(sents):
+                    if (total_len < start and total_len + len(s) > start):
                         rel_map[key][idx] = True
-                        answer_check = True
-                total_len += len(s)
-            
-            if answer_check == False:
+                        if answer_check == False:
+                          countans += 1
+                          answer_check = True
+                    total_len += len(s)
+              
+            if answer_check == False or sents == []:
                 rel_map.pop(key)
                 example_map.pop(key)
-                logging.warning(f'Skipping {id} (answer error)')
-
+                #logging.warning(f'Skipping {id} (answer error)')
+        
+        mean_stats = defaultdict(list)
+        for (_, doc_id), rels in rel_map.items():
+            int_rels = np.array(list(map(int, rels)))
+            p = int_rels.sum()
+            mean_stats['Average spans'].append(p)
+            mean_stats['Random P@1'].append(np.mean(int_rels))
+            n = len(int_rels) - p
+            N = len(int_rels)
+            if (N * (N - 1) * (N - 2)) != 0:
+                r3 = 1 - (n * (n - 1) * (n - 2)) / (N * (N - 1) * (N - 2))
+            else:
+                r3 = 1 - (n * (n - 1) * (n - 2))
+            mean_stats['Random R@3'].append(r3)
+            numer = np.array([sp.comb(n, i) / (N - i) for i in range(0, n + 1)]) * p
+            denom = np.array([sp.comb(N, i) for i in range(0, n + 1)])
+            rr = 1 / np.arange(1, n + 2)
+            rmrr = np.sum(numer * rr / denom)
+            mean_stats['Random MRR'].append(rmrr)
+            if not any(rels):
+                logging.warning(f'{doc_id} has no relevant answers')
+        for k, v in mean_stats.items():
+            logging.info(f'{k}: {np.mean(v)}')
 
         return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
                 dict(docid=id)), sents)), rels)
