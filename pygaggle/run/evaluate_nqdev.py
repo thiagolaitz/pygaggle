@@ -10,6 +10,7 @@ from transformers import (
                           BertForSequenceClassification,
                          )
 import torch
+import numpy as np
 
 from .args import ArgumentParserBuilder, opt
 from pygaggle.rerank.base import Reranker
@@ -203,7 +204,7 @@ def main():
                  opt('--model-type', type=str))
     args = apb.parser.parse_args()
     options = NQEvaluationOptions(**vars(args))
-    ds = NQDevDataset.from_file(str(options.dataset),2100)
+    ds = NQDevDataset.from_file(str(options.dataset),1150)
     examples = ds.to_senticized_dataset()
 
     construct_map = dict(transformer=construct_transformer,
@@ -221,11 +222,16 @@ def main():
     
     evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
-    stdout = []
-    for metric in evaluator.evaluate(examples):
-        logging.info(f'{metric.name:<{width}}{metric.value:.5}')
-        stdout.append(f'{metric.name}\t{metric.value}')
-    print('\n'.join(stdout))
+    threshold_list = np.linspace(-20, 0, 10)
+    
+    for t in threshold_list:
+        stdout = []
+        print("Threshold: {}".format(t))
+        for metric in evaluator.evaluate(examples, t):
+            logging.info(f'{metric.name:<{width}}{metric.value:.5}')
+            stdout.append(f'{metric.name}\t{metric.value}')
+        print('\n'.join(stdout))
+        print("")
 
 
 if __name__ == '__main__':

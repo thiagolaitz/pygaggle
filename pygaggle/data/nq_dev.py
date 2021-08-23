@@ -149,8 +149,6 @@ class NQDevDataset(BaseModel):
         example_map = OrderedDict()
         rel_map = OrderedDict()
 
-        countans = 0
-        count1 = 0
         for query, annotations, context, id in self.query_answer():
             key = (query, id)
             context_split = context.split(' ')
@@ -164,10 +162,9 @@ class NQDevDataset(BaseModel):
                 logging.warning(f'Skipping {id} ({e})')
                 continue
             sents = example_map[key]
-
             rel_map.setdefault(key, [False] * len(sents))
 
-            answer_check = False
+            #answer_check = False
             for a in annotations:
               for short in a.short_answers:
                 start = 0
@@ -180,16 +177,14 @@ class NQDevDataset(BaseModel):
                 for idx, s in enumerate(sents):
                     if (total_len < start and total_len + len(s) > start):
                         rel_map[key][idx] = True
-                        if answer_check == False:
-                          countans += 1
-                          answer_check = True
+                        #if answer_check == False:
+                        #  answer_check = True
                     total_len += len(s)
-              
-            if answer_check == False or sents == []:
-                rel_map.pop(key)
-                example_map.pop(key)
-                #logging.warning(f'Skipping {id} (answer error)')
-        
+
+            '''if answer_check == False or sents == []:
+              rel_map.pop(key)
+              example_map.pop(key)'''
+
         mean_stats = defaultdict(list)
         for (_, doc_id), rels in rel_map.items():
             int_rels = np.array(list(map(int, rels)))
@@ -208,8 +203,7 @@ class NQDevDataset(BaseModel):
             rr = 1 / np.arange(1, n + 2)
             rmrr = np.sum(numer * rr / denom)
             mean_stats['Random MRR'].append(rmrr)
-            if not any(rels):
-                logging.warning(f'{doc_id} has no relevant answers')
+            
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
 

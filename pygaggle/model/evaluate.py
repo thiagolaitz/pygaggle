@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from copy import deepcopy
 from typing import List, Optional, Dict
 from pathlib import Path
 import os
@@ -24,7 +25,7 @@ METRIC_MAP = OrderedDict()
 class MetricAccumulator:
     name: str = None
 
-    def accumulate(self, scores: List[float], gold: List[RelevanceExample]):
+    def accumulate(self, scores: List[float], gold: List[RelevanceExample], threshold: float):
         return
 
     @abc.abstractmethod
@@ -61,12 +62,15 @@ def metric_names():
 class TopkMixin(TruncatingMixin):
     top_k: int = None
 
-    def truncated_rels(self, scores: List[float]) -> np.ndarray:
+    def truncated_rels(self, scores: List[float], threshold: float) -> np.ndarray:
         rel_idxs = sorted(list(enumerate(scores)),
                           key=lambda x: x[1], reverse=True)[self.top_k:]
         scores = np.array(scores)
+        scores_backup = deepcopy(scores)
         scores[[x[0] for x in rel_idxs]] = -1
-        print(rel_idxs)
+        for idx, x in enumerate(scores_backup):
+            if x < threshold:
+                scores[idx] = -1
         return scores
 
 
@@ -75,18 +79,13 @@ class DynamicThresholdingMixin(TruncatingMixin):
 
     def truncated_rels(self, scores: List[float]) -> np.ndarray:
         scores = np.array(scores)
-        scores[scores < self.threshold * np.max(scores)] = -1#0
-        #--------------
-        rel_idxs = sorted(list(enumerate(scores)),
-                          key=lambda x: x[1], reverse=True)[2:]
-        scores = np.array(scores)
-        scores[[x[0] for x in rel_idxs]] = -1
+        scores[scores < self.threshold * np.max(scores)] = 0
         return scores
 
 
 class RecallAccumulator(TruncatingMixin, MeanAccumulator):
-    def accumulate(self, scores: List[float], gold: RelevanceExample):
-        score_rels = self.truncated_rels(scores)
+    def accumulate(self, scores: List[float], gold: RelevanceExample, threshold: float):
+        score_rels = self.truncated_rels(scores, threshold)
         score_rels[score_rels != -1] = 1
         score_rels[score_rels == -1] = 0
         gold_rels = np.array(gold.labels, dtype=int)
@@ -95,8 +94,8 @@ class RecallAccumulator(TruncatingMixin, MeanAccumulator):
 
 
 class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
-    def accumulate(self, scores: List[float], gold: RelevanceExample):
-        score_rels = self.truncated_rels(scores)
+    def accumulate(self, scores: List[float], gold: RelevanceExample, threshold: float):
+        score_rels = self.truncated_rels(scores, threshold)
         score_rels[score_rels != -1] = 1
         score_rels[score_rels == -1] = 0
         score_rels = score_rels.astype(int)
@@ -104,6 +103,17 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         sum_score = score_rels.sum()
         if sum_score > 0:
             self.scores.append((score_rels & gold_rels).sum() / sum_score)
+        else:
+            self.scores.append(0)
+        ''' 
+        else if gold_rels.sum() == 0:
+            self.scores.append(1)
+        else:
+            self.scores.append(0)
+        '''
+
+
+
 
 @register_metric('precision@1')
 class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
@@ -111,8 +121,8 @@ class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
 
 
 @register_metric('precision@2')
-class PrecisionAt2Metric(DynamicThresholdingMixin, PrecisionAccumulator):
-    threshold = 0.5
+class PrecisionAt2Metric(TopkMixin, PrecisionAccumulator):
+    top_k = 2
 
 
 @register_metric('recall@3')
@@ -132,21 +142,23 @@ class RecallAt1000Metric(TopkMixin, RecallAccumulator):
 
 @register_metric('mrr')
 class MrrMetric(MeanAccumulator):
-    def accumulate(self, scores: List[float], gold: RelevanceExample):
+    def accumulate(self, scores: List[float], gold: RelevanceExample, threshold: float):
         scores = sorted(list(enumerate(scores)),
                         key=lambda x: x[1], reverse=True)
-        rr = next((1 / (rank_idx + 1) for rank_idx, (idx, _) in
-                   enumerate(scores) if gold.labels[idx]), 0)
+
+        rr = next((1 / (rank_idx + 1) for rank_idx, (idx, s) in
+                enumerate(scores) if gold.labels[idx] and s > threshold), 0)
+        
         self.scores.append(rr)
 
 
 @register_metric('mrr@10')
 class MrrAt10Metric(MeanAccumulator):
-    def accumulate(self, scores: List[float], gold: RelevanceExample):
+    def accumulate(self, scores: List[float], gold: RelevanceExample, threshold: float):
         scores = sorted(list(enumerate(scores)), key=lambda x: x[1],
                         reverse=True)
-        rr = next((1 / (rank_idx + 1) for rank_idx, (idx, _) in
-                   enumerate(scores) if (gold.labels[idx] and rank_idx < 10)),
+        rr = next((1 / (rank_idx + 1) for rank_idx, (idx, s) in
+                   enumerate(scores) if (gold.labels[idx] and rank_idx < 10 and s > threshold)),
                   0)
         self.scores.append(rr)
 
@@ -172,16 +184,17 @@ class RerankerEvaluator:
         self.writer = writer
 
     def evaluate(self,
-                 examples: List[RelevanceExample]) -> List[MetricAccumulator]:
+                 examples: List[RelevanceExample], threshold: float) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
 
         for example in tqdm(examples, disable=not self.use_tqdm):
             scores = [x.score for x in self.reranker.rescore(example.query,
                                                              example.documents)]
+            
             if self.writer is not None:
                 self.writer.write(scores, example)
             for metric in metrics:
-                metric.accumulate(scores, example)
+                metric.accumulate(scores, example, threshold)
 
         return metrics
 
