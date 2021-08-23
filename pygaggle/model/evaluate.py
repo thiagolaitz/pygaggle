@@ -103,16 +103,10 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         sum_score = score_rels.sum()
         if sum_score > 0:
             self.scores.append((score_rels & gold_rels).sum() / sum_score)
-        else:
-            self.scores.append(0)
-        ''' 
-        else if gold_rels.sum() == 0:
+        elif gold_rels.sum() == 0:
             self.scores.append(1)
         else:
             self.scores.append(0)
-        '''
-
-
 
 
 @register_metric('precision@1')
