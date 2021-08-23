@@ -67,7 +67,6 @@ class SquadDataset(BaseModel):
         count = 0
         for query, answers, context, id in self.query_answer():
             key = (query, id)
-            answer_check = False
 
             try:
                 example_map.setdefault(key, tokenizer(context))
@@ -82,13 +81,7 @@ class SquadDataset(BaseModel):
                 for a in answers:
                     if (a.answer_start >= total_len and a.answer_start <= total_len+len(s)):
                         rel_map[key][idx] = True
-                        answer_check = True
                 total_len += len(s)
-            
-            '''if answer_check == False:
-                rel_map.pop(key)
-                example_map.pop(key)
-                logging.warning(f'Skipping {id} (answer error)')'''
 
         mean_stats = defaultdict(list)
         for (_, doc_id), rels in rel_map.items():
