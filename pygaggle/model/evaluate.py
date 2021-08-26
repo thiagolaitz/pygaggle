@@ -103,8 +103,6 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         sum_score = score_rels.sum()
         if sum_score > 0:
             self.scores.append((score_rels & gold_rels).sum() / sum_score)
-        elif gold_rels.sum() == 0:
-            self.scores.append(1)
         else:
             self.scores.append(0)
 
@@ -117,6 +115,18 @@ class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
 @register_metric('precision@2')
 class PrecisionAt2Metric(TopkMixin, PrecisionAccumulator):
     top_k = 2
+
+
+@register_metric('recall@2')
+class RecallAt2Metric(TopkMixin, RecallAccumulator):
+    top_k = 2
+
+
+@register_metric('f1@2')
+class F1At2Metric(MeanAccumulator):
+    def accumulate(self, r2, p2):
+        if r2 + p2 != 0:
+            self.scores.append((2*r2*p2)/(r2+p2))
 
 
 @register_metric('recall@3')
@@ -188,7 +198,17 @@ class RerankerEvaluator:
             if self.writer is not None:
                 self.writer.write(scores, example)
             for metric in metrics:
-                metric.accumulate(scores, example, threshold)
+                if metric.name == 'f1@2':
+                    r2 = []
+                    p2 = []
+                    for k in metrics:
+                        if k.name == "recall@2":
+                            r2 = k.value
+                        elif k.name == "precision@2":
+                            p2 = k.value
+                    metric.accumulate(r2, p2)
+                else:
+                    metric.accumulate(scores, example, threshold)
 
         return metrics
 

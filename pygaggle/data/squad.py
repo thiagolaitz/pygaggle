@@ -21,20 +21,22 @@ MISSING_ID = '<missing>'
 
 
 class SquadAnswer(BaseModel):
-    answer_start: int
     text: str
+    answer_start: int
+    
 
 
 class SquadQas(BaseModel):
-    answers: List[SquadAnswer]
     question: str
     id: str
+    answers: List[SquadAnswer]
+    is_impossible: str
 
 
 class SquadSubcategory(BaseModel):
-    context: str
     qas: List[SquadQas]
-
+    context: str
+    
 
 class SquadData(BaseModel):
     title: str
@@ -42,13 +44,13 @@ class SquadData(BaseModel):
 
 
 class SquadDataset(BaseModel):
-    data: List[SquadData]
     version: str
+    data: List[SquadData]
+    
 
     @classmethod
     def from_file(cls, filename: str) -> 'SquadDataset':
         with open(filename, encoding='utf-8') as f:
-            print(type(json.load(f)))
             return cls(**json.load(f))
 
     def query_answer(self):
@@ -108,8 +110,7 @@ class SquadDataset(BaseModel):
             rr = 1 / np.arange(1, n + 2)
             rmrr = np.sum(numer * rr / denom)
             mean_stats['Random MRR'].append(rmrr)
-            if not any(rels):
-                logging.warning(f'{doc_id} has no relevant answers')
+        
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
 
