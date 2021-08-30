@@ -28,7 +28,8 @@ __all__ = ['MonoT5',
            'UnsupervisedTransformerReranker',
            'MonoBERT',
            'QuestionAnsweringTransformerReranker',
-           'SentenceTransformersReranker']
+           'SentenceTransformersReranker',
+           'AlbertReranker']
 
 
 class MonoT5(Reranker):
@@ -215,7 +216,6 @@ class MT5_EN_PT(Reranker):
                                                 attention_mask=attn_mask,
                                                 return_last_logits=True)
 
-                # 259 and 6274 are the indexes of the tokens false and true in T5.
                 batch_scores = batch_scores[:, [375, 36339]]
                 batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
                 batch_log_probs = batch_scores[:, 1].tolist()
@@ -405,6 +405,34 @@ class QuestionAnsweringTransformerReranker(Reranker):
             text.score = max(smax_val.item(), emax_val.item())
 
         return texts
+
+class AlbertReranker(Reranker):
+    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
+        self.tokenizer = tokenizer
+        self.model = model
+        self.device = next(model.parameters()).device
+
+    @torch.no_grad()
+    def rescore(self, query: Query, texts: Text) -> List[int]:
+        context = deepcopy(texts)
+
+        ret = self.tokenizer.encode_plus(query.text,
+                                            context.text,
+                                            add_special_tokens=True,
+                                            return_tensors='pt',
+                                            ).to(self.device)
+        
+        output = self.model(**ret)
+        start_scores, end_scores = output.start_logits, output.end_logits
+
+        smax_idx = torch.argmax(start_scores)
+        emax_idx = torch.argmax(end_scores) + 1
+        smax_idx = smax_idx.cpu().detach().numpy()
+        emax_idx = emax_idx.cpu().detach().numpy()
+        
+        idx = [smax_idx, emax_idx]
+
+        return idx
 
 
 class SentenceTransformersReranker(Reranker):

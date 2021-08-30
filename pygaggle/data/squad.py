@@ -77,6 +77,7 @@ class SquadDataset(BaseModel):
                 logging.warning(f'Skipping {id} ({e})')
                 continue
             sents = example_map[key]
+
             rel_map.setdefault(key, [False] * len(sents))
             
             total_len = 0
@@ -114,8 +115,18 @@ class SquadDataset(BaseModel):
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
 
-        return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
+        rel_ex = []
+        for ((query, id), sents), (_, rels) in zip(example_map.items(), rel_map.items()):
+            query = Query(query)
+            context = ''
+            for s in sents:
+                context = context + s
+            context = Text(context)
+            rel_ex.append(RelevanceExample(query, sents, rels, context))
+        return rel_ex
+        
+        '''[RelevanceExample(Query(query), list(map(lambda s: Text(s,
                 dict(docid=id)), sents)), rels)
                 for ((query, id), sents), (_, rels) in
-                zip(example_map.items(), rel_map.items())]
+                zip(example_map.items(), rel_map.items())]'''
 

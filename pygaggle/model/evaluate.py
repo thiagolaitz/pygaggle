@@ -18,7 +18,7 @@ from pygaggle.qa.base import Reader
 from pygaggle.model.writer import Writer, MsMarcoWriter
 from pygaggle.data.segmentation import SegmentProcessor
 
-__all__ = ['RerankerEvaluator', 'DuoRerankerEvaluator', 'metric_names']
+__all__ = ['RerankerEvaluator', 'RerankerSpanEvaluator', 'DuoRerankerEvaluator', 'metric_names']
 METRIC_MAP = OrderedDict()
 
 
@@ -103,8 +103,6 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         sum_score = score_rels.sum()
         if sum_score > 0:
             self.scores.append((score_rels & gold_rels).sum() / sum_score)
-        else:
-            self.scores.append(0)
 
 
 @register_metric('precision@1')
@@ -120,13 +118,6 @@ class PrecisionAt2Metric(TopkMixin, PrecisionAccumulator):
 @register_metric('recall@2')
 class RecallAt2Metric(TopkMixin, RecallAccumulator):
     top_k = 2
-
-
-@register_metric('f1@2')
-class F1At2Metric(MeanAccumulator):
-    def accumulate(self, r2, p2):
-        if r2 + p2 != 0:
-            self.scores.append((2*r2*p2)/(r2+p2))
 
 
 @register_metric('recall@3')
@@ -176,6 +167,35 @@ class ThresholdedPrecisionMetric(DynamicThresholdingMixin,
     threshold = 0.5
 
 
+class RerankerSpanEvaluator:
+    def __init__(self,
+                 reranker: Reranker,
+                 metric_names: List[str],
+                 use_tqdm: bool = True,
+                 writer: Optional[Writer] = None):
+        self.reranker = reranker
+        self.metrics = [METRIC_MAP[name] for name in metric_names]
+        self.use_tqdm = use_tqdm
+        self.writer = writer
+
+    def evaluate(self,
+                 examples: List[RelevanceExample], threshold: float) -> List[MetricAccumulator]:
+        metrics = [cls() for cls in self.metrics]
+
+        for example in tqdm(examples, disable=not self.use_tqdm):
+            scores = [x for x in self.reranker.rescore(example.query,
+                                                             example.context)]
+            #scores [start, end]
+            print(len(example.labels))
+            print(scores)
+            if self.writer is not None:
+                self.writer.write(scores, example)
+            for metric in metrics:
+                metric.accumulate(scores, example, threshold)
+
+        return metrics
+
+
 class RerankerEvaluator:
     def __init__(self,
                  reranker: Reranker,
@@ -194,21 +214,11 @@ class RerankerEvaluator:
         for example in tqdm(examples, disable=not self.use_tqdm):
             scores = [x.score for x in self.reranker.rescore(example.query,
                                                              example.documents)]
-            
+
             if self.writer is not None:
                 self.writer.write(scores, example)
             for metric in metrics:
-                if metric.name == 'f1@2':
-                    r2 = []
-                    p2 = []
-                    for k in metrics:
-                        if k.name == "recall@2":
-                            r2 = k.value
-                        elif k.name == "precision@2":
-                            p2 = k.value
-                    metric.accumulate(r2, p2)
-                else:
-                    metric.accumulate(scores, example, threshold)
+                metric.accumulate(scores, example, threshold)
 
         return metrics
 

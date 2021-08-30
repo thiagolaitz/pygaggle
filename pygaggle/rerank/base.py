@@ -59,6 +59,9 @@ class Text:
         self.score = score
         self.title = title
 
+    def __str__(self) -> str:
+        return self.text
+        
 
 class Reranker:
     """Class representing a reranker.

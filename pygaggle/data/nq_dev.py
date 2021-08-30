@@ -181,7 +181,7 @@ class NQDevDataset(BaseModel):
                         #  answer_check = True
                     total_len += len(s)
 
-            '''if answer_check == False or sents == []:
+            '''if answer_check == False:
               rel_map.pop(key)
               example_map.pop(key)'''
 

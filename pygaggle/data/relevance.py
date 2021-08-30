@@ -17,6 +17,7 @@ class RelevanceExample:
     query: Query
     documents: List[Text]
     labels: List[bool]
+    context: Optional[Text] = ''
 
 
 @dataclass
