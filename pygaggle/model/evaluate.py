@@ -18,7 +18,7 @@ from pygaggle.qa.base import Reader
 from pygaggle.model.writer import Writer, MsMarcoWriter
 from pygaggle.data.segmentation import SegmentProcessor
 
-__all__ = ['RerankerEvaluator', 'RerankerSpanEvaluator', 'DuoRerankerEvaluator', 'metric_names']
+__all__ = ['RerankerEvaluator', 'DuoRerankerEvaluator', 'metric_names']
 METRIC_MAP = OrderedDict()
 
 
@@ -183,15 +183,11 @@ class RerankerSpanEvaluator:
         metrics = [cls() for cls in self.metrics]
 
         for example in tqdm(examples, disable=not self.use_tqdm):
-            scores = [x for x in self.reranker.rescore(example.query,
-                                                             example.context)]
-            #scores [start, end]
-            print(len(example.labels))
-            print(scores)
-            if self.writer is not None:
-                self.writer.write(scores, example)
+            rel_map = [x for x in self.reranker.rescore(example.query,
+                                                       example.context)]
+            
             for metric in metrics:
-                metric.accumulate(scores, example, threshold)
+                metric.accumulate(rel_map, example, threshold)
 
         return metrics
 

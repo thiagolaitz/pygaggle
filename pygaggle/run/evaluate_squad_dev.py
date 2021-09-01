@@ -239,8 +239,8 @@ def main():
     #evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
     stdout = []
-    threshold_list = np.linspace(-20, 0, 10)
-    threshold_list = [5]
+    threshold_list = np.linspace(-2, 7, 10)
+
     for t in threshold_list:
         stdout = []
         print("Threshold: {}".format(t))

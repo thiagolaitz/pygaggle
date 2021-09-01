@@ -2,6 +2,7 @@ from collections import defaultdict
 from copy import deepcopy
 from itertools import combinations, permutations
 from typing import List
+from pygaggle.model.tokenize import SpacySenticizer
 
 from transformers import (AutoTokenizer,
                           AutoModelForSequenceClassification,
@@ -9,6 +10,7 @@ from transformers import (AutoTokenizer,
                           PreTrainedTokenizer,
                           T5ForConditionalGeneration)
 import torch
+import numpy as np
 from sentence_transformers import CrossEncoder, SentenceTransformer, util
 from .base import Reranker, Query, Text
 from .similarity import SimilarityMatrixProvider
@@ -413,26 +415,49 @@ class AlbertReranker(Reranker):
         self.device = next(model.parameters()).device
 
     @torch.no_grad()
-    def rescore(self, query: Query, texts: Text) -> List[int]:
+    def rescore(self, query: Query, texts: Text, threshold: float) -> List[int]:
         context = deepcopy(texts)
-
+        senticizer = SpacySenticizer()
         ret = self.tokenizer.encode_plus(query.text,
-                                            context.text,
+                                            context,
+                                            max_length=512,
+                                            truncation=True,
                                             add_special_tokens=True,
                                             return_tensors='pt',
                                             ).to(self.device)
-        
+        input_ids = ret["input_ids"].tolist()[0]
+        tt_ids = ret['token_type_ids'].tolist()[0]
+        sents = senticizer(context)
         output = self.model(**ret)
         start_scores, end_scores = output.start_logits, output.end_logits
-
-        smax_idx = torch.argmax(start_scores)
-        emax_idx = torch.argmax(end_scores) + 1
-        smax_idx = smax_idx.cpu().detach().numpy()
-        emax_idx = emax_idx.cpu().detach().numpy()
-        
+        start_scores = start_scores.tolist()[0]
+        end_scores = end_scores.tolist()[0]
+        count = 0
+        for k in tt_ids:
+            if k == 0:
+                count += 1
+            else:
+                break
+        smax_idx = np.argmax(start_scores[count:]) + count
+        emax_idx = np.argmax(end_scores[count:]) + count
+        score = start_scores[0] + end_scores[0] - start_scores[smax_idx] - end_scores[emax_idx]
         idx = [smax_idx, emax_idx]
+        #answer = self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[smax_idx+count:emax_idx+count]))
+        #return rel_map
+        rel_map = [0 for _ in sents]
 
-        return idx
+        len_start = len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:smax_idx])))
+        len_end = len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:emax_idx])))
+        s_len = 0
+        if score <= threshold and emax_idx > smax_idx:
+            for idx, s in enumerate(sents):
+                if s_len <= len_start and (s_len+len(s) >= len_start):
+                    rel_map[idx] = 1
+                elif s_len <= len_end and (s_len+len(s) >= len_end):
+                    rel_map[idx] = 1
+                s_len += len(s)
+
+        return rel_map
 
 
 class SentenceTransformersReranker(Reranker):

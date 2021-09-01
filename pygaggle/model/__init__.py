@@ -8,3 +8,4 @@ from .evaluate import *
 from .serialize import *
 from .tokenize import *
 from .writer import *
+from .evaluatespan import *

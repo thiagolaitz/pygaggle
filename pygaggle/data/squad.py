@@ -65,12 +65,12 @@ class SquadDataset(BaseModel):
         tokenizer = SpacySenticizer()
         example_map = OrderedDict()
         rel_map = OrderedDict()
-        
+        context_list = []
         count = 0
         for query, answers, context, id in self.query_answer():
             key = (query, id)
             answer_check = False
-
+            context_list.append(context)
             try:
                 example_map.setdefault(key, tokenizer(context))
             except ValueError as e:
@@ -115,18 +115,9 @@ class SquadDataset(BaseModel):
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
 
-        rel_ex = []
-        for ((query, id), sents), (_, rels) in zip(example_map.items(), rel_map.items()):
-            query = Query(query)
-            context = ''
-            for s in sents:
-                context = context + s
-            context = Text(context)
-            rel_ex.append(RelevanceExample(query, sents, rels, context))
-        return rel_ex
-        
-        '''[RelevanceExample(Query(query), list(map(lambda s: Text(s,
-                dict(docid=id)), sents)), rels)
-                for ((query, id), sents), (_, rels) in
-                zip(example_map.items(), rel_map.items())]'''
+
+        return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
+                dict(docid=id)), sents)), rels, context)
+                for ((query, id), sents), (_, rels), context in
+                zip(example_map.items(), rel_map.items(), context_list)]
 
