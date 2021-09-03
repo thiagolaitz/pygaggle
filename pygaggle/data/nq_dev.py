@@ -148,11 +148,13 @@ class NQDevDataset(BaseModel):
         tokenizer = SpacySenticizer()
         example_map = OrderedDict()
         rel_map = OrderedDict()
+        context_list = []
 
         for query, annotations, context, id in self.query_answer():
             key = (query, id)
             context_split = context.split(' ')
-
+            context_list.append(context)
+            
             if (len(context_split) > 15000):
               continue
 
@@ -208,7 +210,12 @@ class NQDevDataset(BaseModel):
             logging.info(f'{k}: {np.mean(v)}')
 
         return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
-                dict(docid=id)), sents)), rels)
-                for ((query, id), sents), (_, rels) in
-                zip(example_map.items(), rel_map.items())]
+                dict(docid=id)), sents)), rels, context)
+                for ((query, id), sents), (_, rels), context in
+                zip(example_map.items(), rel_map.items(), context_list)]
 
+
+        '''[RelevanceExample(Query(query), list(map(lambda s: Text(s,
+                                dict(docid=id)), sents)), rels)
+                                for ((query, id), sents), (_, rels) in
+                                zip(example_map.items(), rel_map.items())]'''

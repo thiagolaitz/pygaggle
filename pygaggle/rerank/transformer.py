@@ -415,12 +415,12 @@ class AlbertReranker(Reranker):
         self.device = next(model.parameters()).device
 
     @torch.no_grad()
-    def rescore(self, query: Query, texts: Text, threshold: float) -> List[int]:
+    def rescore(self, query: Query, texts: Text, threshold: float, top_n: int) -> List[int]:
         context = deepcopy(texts)
         senticizer = SpacySenticizer()
         ret = self.tokenizer.encode_plus(query.text,
                                             context,
-                                            max_length=512,
+                                            max_length=384,
                                             truncation=True,
                                             add_special_tokens=True,
                                             return_tensors='pt',
@@ -432,30 +432,45 @@ class AlbertReranker(Reranker):
         start_scores, end_scores = output.start_logits, output.end_logits
         start_scores = start_scores.tolist()[0]
         end_scores = end_scores.tolist()[0]
+        start_scores = np.array(start_scores, dtype=float)
+        end_scores = np.array(end_scores, dtype=float)
         count = 0
         for k in tt_ids:
             if k == 0:
                 count += 1
             else:
                 break
-        smax_idx = np.argmax(start_scores[count:]) + count
-        emax_idx = np.argmax(end_scores[count:]) + count
-        score = start_scores[0] + end_scores[0] - start_scores[smax_idx] - end_scores[emax_idx]
-        idx = [smax_idx, emax_idx]
+        if len(start_scores)-count != len(sents):
+            print(count, len(start_scores), len(sents))
+            return 0
+        smax_idx = start_scores[count:].argsort()[-top_n:][::-1] + count
+        emax_idx = end_scores[count:].argsort()[-top_n:][::-1] + count
+        score = []
+        for n in range(top_n):
+            score.append(start_scores[0] + end_scores[0] - start_scores[smax_idx[n]] - end_scores[emax_idx[n]])
+        
+        #idx = [smax_idx, emax_idx]
         #answer = self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[smax_idx+count:emax_idx+count]))
-        #return rel_map
         rel_map = [0 for _ in sents]
+        
+        len_start = []
+        len_end = []
+        for n in range(top_n):
+            len_start.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:smax_idx[n]]))))
+            len_end.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:emax_idx[n]]))))
 
-        len_start = len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:smax_idx])))
-        len_end = len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:emax_idx])))
-        s_len = 0
-        if score <= threshold and emax_idx > smax_idx:
-            for idx, s in enumerate(sents):
-                if s_len <= len_start and (s_len+len(s) >= len_start):
-                    rel_map[idx] = 1
-                elif s_len <= len_end and (s_len+len(s) >= len_end):
-                    rel_map[idx] = 1
-                s_len += len(s)
+        for n in range(top_n):    
+            s_len = 0
+            if score[n] <= threshold and emax_idx[n] > smax_idx[n]:
+                start = -2
+                for idx, s in enumerate(sents):
+                    if s_len <= len_start[n] and (s_len+len(s) >= len_start[n]):
+                        start = idx
+                        rel_map[idx] = 1
+                    elif s_len <= len_end[n] and (s_len+len(s) >= len_end[n]):
+                        if (start != -2 and idx-start <= 1 and np.sum(rel_map)+1 <= top_n):
+                            rel_map[start+1] = 1
+                    s_len += len(s)
 
         return rel_map
 

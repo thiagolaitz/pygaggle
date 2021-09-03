@@ -99,16 +99,16 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         if sum_score > 0:
             self.scores.append((rel_list & gold_rels).sum() / sum_score)
 
-
+'''
 @register_metric('precision@1')
 class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
     top_k = 1
-
 '''
+
 @register_metric('precision@2')
 class PrecisionAt2Metric(TopkMixin, PrecisionAccumulator):
     top_k = 2
-'''
+
 
 @register_metric('recall@2')
 class RecallAt2Metric(TopkMixin, RecallAccumulator):
@@ -177,12 +177,19 @@ class RerankerSpanEvaluator:
     def evaluate(self,
                  examples: List[RelevanceExample], threshold: float) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
-
+        
         for example in tqdm(examples, disable=not self.use_tqdm):
-            rel_map = self.reranker.rescore(example.query, example.context, threshold)
-
+            context_split = example.context.split(' ')
+            if (len(context_split) > 15000):
+              continue
+            
+            #10 sentences - stride of 5
+            rel_map = self.reranker.rescore(example.query, example.context, threshold, top_n = 2)
+            print(rel_map)
+            if rel_map == 0:
+                continue
+            print(example.labels)
             for metric in metrics:
                 metric.accumulate(rel_map, example, threshold)
-
 
         return metrics

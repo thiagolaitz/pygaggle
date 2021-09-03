@@ -25,11 +25,13 @@ from pygaggle.rerank.transformer import (
     UnsupervisedTransformerReranker,
     SentenceTransformersReranker,
     SentenceTransformersBiEncoder,
-    MT5_EN_PT
+    MT5_EN_PT,
+    AlbertReranker
     )
 from pygaggle.rerank.random import RandomReranker
 from pygaggle.rerank.similarity import CosineSimilarityMatrixProvider
 from pygaggle.model import (RerankerEvaluator,
+                            RerankerSpanEvaluator,
                             SimpleBatchTokenizer,
                             metric_names)
 from pygaggle.data import NQDevDataset
@@ -37,7 +39,7 @@ from pygaggle.settings import Cord19Settings
 
 
 SETTINGS = Cord19Settings()
-METHOD_CHOICES = ('transformer', 'mt5_en_pt', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
+METHOD_CHOICES = ('transformer', 'albert', 'mt5_en_pt', 'biencoder', 'ptt5' , 'mt5', 'minilm', 'bm25', 'duot5' ,'t5', 'seq_class_transformer',
                   'qa_transformer', 'random')
 
 
@@ -91,6 +93,20 @@ def construct_mt5(options: NQEvaluationOptions) -> Reranker:
                              device=options.device)
     tokenizer = MT5.get_tokenizer(options.model, batch_size=options.batch_size)
     return MT5(model, tokenizer)
+
+
+def construct_albert(options: NQEvaluationOptions) -> Reranker:
+    try:
+        model = AutoModelForQuestionAnswering.from_pretrained(
+                    options.model)
+    except OSError:
+        model = AutoModelForQuestionAnswering.from_pretrained(
+                    options.model, from_tf=True)
+    device = torch.device(options.device)
+    model = model.to(device).eval()
+    tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    
+    return AlbertReranker(model, tokenizer)
 
 
 def construct_ptt5(options: NQEvaluationOptions) -> Reranker:
@@ -208,6 +224,7 @@ def main():
     examples = ds.to_senticized_dataset()
 
     construct_map = dict(transformer=construct_transformer,
+                         albert=construct_albert,
                          t5=construct_t5,
                          seq_class_transformer=construct_seq_class_transformer,
                          qa_transformer=construct_qa_transformer,
@@ -219,8 +236,8 @@ def main():
                          ptt5 = construct_ptt5,
                          random=lambda _: RandomReranker())
     reranker = construct_map[options.method](options)
-    
-    evaluator = RerankerEvaluator(reranker, options.metrics)
+    evaluator = RerankerSpanEvaluator(reranker, options.metrics)
+    #evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
     threshold_list = np.linspace(-20, 0, 10)
     
