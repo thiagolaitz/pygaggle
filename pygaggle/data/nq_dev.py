@@ -154,9 +154,6 @@ class NQDevDataset(BaseModel):
             key = (query, id)
             context_split = context.split(' ')
             context_list.append(context)
-            
-            if (len(context_split) > 15000):
-              continue
 
             try:
                 example_map.setdefault(key, tokenizer(context))
@@ -208,7 +205,8 @@ class NQDevDataset(BaseModel):
             
         for k, v in mean_stats.items():
             logging.info(f'{k}: {np.mean(v)}')
-
+        
+        assert len(example_map.items()) == len(rel_map.items()) == len(context_list), "erro"
         return [RelevanceExample(Query(query), list(map(lambda s: Text(s,
                 dict(docid=id)), sents)), rels, context)
                 for ((query, id), sents), (_, rels), context in

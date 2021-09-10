@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from copy import deepcopy
+from pygaggle.model.tokenize import SpacySenticizer
 from typing import List, Optional, Dict
 from pathlib import Path
 import os
@@ -177,18 +178,21 @@ class RerankerSpanEvaluator:
     def evaluate(self,
                  examples: List[RelevanceExample], threshold: float) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
+        senticizer = SpacySenticizer()
         
         for example in tqdm(examples, disable=not self.use_tqdm):
             context_split = example.context.split(' ')
+
             if (len(context_split) > 15000):
               continue
-            
-            #10 sentences - stride of 5
+
             rel_map = self.reranker.rescore(example.query, example.context, threshold, top_n = 2)
-            print(rel_map)
-            if rel_map == 0:
+
+            if len(example.labels) != len(rel_map):
+                print("ruim")
+                print(len(senticizer(example.context)))
                 continue
-            print(example.labels)
+
             for metric in metrics:
                 metric.accumulate(rel_map, example, threshold)
 

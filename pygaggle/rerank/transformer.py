@@ -418,46 +418,104 @@ class AlbertReranker(Reranker):
     def rescore(self, query: Query, texts: Text, threshold: float, top_n: int) -> List[int]:
         context = deepcopy(texts)
         senticizer = SpacySenticizer()
-        ret = self.tokenizer.encode_plus(query.text,
-                                            context,
-                                            max_length=384,
-                                            truncation=True,
-                                            add_special_tokens=True,
-                                            return_tensors='pt',
-                                            ).to(self.device)
-        input_ids = ret["input_ids"].tolist()[0]
-        tt_ids = ret['token_type_ids'].tolist()[0]
+
         sents = senticizer(context)
-        output = self.model(**ret)
+        
+        ret2 = self.tokenizer(
+            query.text, 
+            context,    
+            truncation="only_second",        
+            max_length=384,
+            stride=192,
+            return_tensors='pt',
+            return_overflowing_tokens=True,
+            padding="max_length"
+        ).to(self.device)
+        
+        overflow_map = ret2.pop('overflow_to_sample_mapping')
+        token_type = ret2.pop('token_type_ids')
+        token_type = token_type.tolist()[0]
+        output = self.model(**ret2)
+
         start_scores, end_scores = output.start_logits, output.end_logits
-        start_scores = start_scores.tolist()[0]
-        end_scores = end_scores.tolist()[0]
+        start_scores = start_scores.tolist()
+        end_scores = end_scores.tolist()
         start_scores = np.array(start_scores, dtype=float)
         end_scores = np.array(end_scores, dtype=float)
-        count = 0
-        for k in tt_ids:
-            if k == 0:
+        
+        print(ret2)
+        count = 0#length of query
+        for t in token_type:
+            if (t == 0):
                 count += 1
             else:
                 break
-        if len(start_scores)-count != len(sents):
-            print(count, len(start_scores), len(sents))
-            return 0
-        smax_idx = start_scores[count:].argsort()[-top_n:][::-1] + count
-        emax_idx = end_scores[count:].argsort()[-top_n:][::-1] + count
-        score = []
-        for n in range(top_n):
-            score.append(start_scores[0] + end_scores[0] - start_scores[smax_idx[n]] - end_scores[emax_idx[n]])
+
+        #Select max start/end scores
+        start_max = [np.max(s[count:]) for s in start_scores]
+        end_max = [np.max(s[count:]) for s in end_scores]      
+        
+        top1 = -500
+        top2 = -500
+        top1_s = 0
+        top2_s = 0
+
+        for idx,s in enumerate(start_max):
+            if (s > top1):
+                top1 = s
+                top1_s = idx#index to window
+
+        for idx,s in enumerate(start_max):
+            if (s < top1 and s > top2):
+                top2 = s
+                top2_s = idx
+
+
+        smax_idx = []#Position of max token in the top 2 score sentences
+        smax_idx.append(np.argmax(start_scores[top1_s][count:])+count)
+        smax_idx.append(np.argmax(start_scores[top2_s][count:])+count)
+
+        top1 = -500
+        top2 = -500
+        top1_e = 0
+        top2_e = 0
+
+        for idx,s in enumerate(end_max):
+            if (s > top1):
+                top1 = s
+                top1_e = idx#index to window
+
+        for idx,s in enumerate(end_max):
+            if (s < top1 and s > top2):
+                top2 = s
+                top2_e = idx
+        
+        emax_idx = []
+        emax_idx.append(np.argmax(end_scores[top1_e][count:])+count-1)
+        emax_idx.append(np.argmax(end_scores[top2_e][count:])+count-1)
+
+        score = []#Scores to determine if the sentence has an answer
+        score.append(start_scores[top1_s][0] + end_scores[top1_e][0] - start_scores[top1_s][smax_idx[0]] - end_scores[top1_e][emax_idx[0]])
+        score.append(start_scores[top2_s][1] + end_scores[top2_e][1] - start_scores[top2_s][smax_idx[1]] - end_scores[top2_e][emax_idx[1]])
         
         #idx = [smax_idx, emax_idx]
-        #answer = self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[smax_idx+count:emax_idx+count]))
+        input_ids = ret2['input_ids'][top1_s].tolist()
+        answer = self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[::]))
+
         rel_map = [0 for _ in sents]
-        
         len_start = []
         len_end = []
-        for n in range(top_n):
-            len_start.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:smax_idx[n]]))))
-            len_end.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count:emax_idx[n]]))))
+
+        #somar 192 por indice
+        s1_over = top1_s * 192
+        e1_over = top1_e * 192
+        len_start.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count+s1_over:smax_idx[0]]))))
+        len_end.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count+e1_over:emax_idx[0]]))))
+
+        s2_over = top2_s * 192
+        e2_over = top2_e * 192
+        len_start.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count+s2_over:smax_idx[1]]))))
+        len_end.append(len(self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_ids[count+e2_over:emax_idx[1]]))))
 
         for n in range(top_n):    
             s_len = 0
@@ -471,7 +529,7 @@ class AlbertReranker(Reranker):
                         if (start != -2 and idx-start <= 1 and np.sum(rel_map)+1 <= top_n):
                             rel_map[start+1] = 1
                     s_len += len(s)
-
+        
         return rel_map
 
 
