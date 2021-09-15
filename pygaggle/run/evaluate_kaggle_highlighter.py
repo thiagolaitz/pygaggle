@@ -101,9 +101,9 @@ def construct_albert(options: KaggleEvaluationOptions) -> Reranker:
     except OSError:
         model = AutoModelForQuestionAnswering.from_pretrained(
                     options.model, from_tf=True)
-    device = torch.device(options.device)
+    device = torch.device(options.device)#options.device
     model = model.to(device).eval()
-    tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    tokenizer = AutoTokenizer.from_pretrained(options.model)
     
     return AlbertReranker(model, tokenizer)
 
@@ -254,7 +254,7 @@ def main():
     #evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
     stdout = []
-    threshold = [-30]
+    threshold = [30]
     for metric in evaluator.evaluate(examples, threshold):
         logging.info(f'{metric.name:<{width}}{metric.value:.5}')
         stdout.append(f'{metric.name}\t{metric.value}')

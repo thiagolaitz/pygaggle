@@ -104,7 +104,7 @@ def construct_albert(options: NQEvaluationOptions) -> Reranker:
                     options.model, from_tf=True)
     device = torch.device(options.device)
     model = model.to(device).eval()
-    tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    tokenizer = AutoTokenizer.from_pretrained(options.model)
     
     return AlbertReranker(model, tokenizer)
 
@@ -220,7 +220,7 @@ def main():
                  opt('--model-type', type=str))
     args = apb.parser.parse_args()
     options = NQEvaluationOptions(**vars(args))
-    ds = NQDevDataset.from_file(str(options.dataset),1150)
+    ds = NQDevDataset.from_file(str(options.dataset),1100)
     examples = ds.to_senticized_dataset()
 
     construct_map = dict(transformer=construct_transformer,
@@ -240,7 +240,7 @@ def main():
     #evaluator = RerankerEvaluator(reranker, options.metrics)
     width = max(map(len, args.metrics)) + 1
     threshold_list = np.linspace(-20, 0, 10)
-    
+    threshold_list = [30]
     for t in threshold_list:
         stdout = []
         print("Threshold: {}".format(t))

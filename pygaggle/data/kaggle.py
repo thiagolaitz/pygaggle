@@ -63,6 +63,7 @@ class LitReviewDataset(BaseModel):
         #len_doc = []
         #len_sents = []
         for query, document in self.query_answer_pairs(split=split):
+            context_list = []
             if document.id == MISSING_ID:
                 logging.warning(f'Skipping {document.title} (missing ID)')
                 continue
@@ -70,11 +71,12 @@ class LitReviewDataset(BaseModel):
             try:
                 doc = loader.load_document(document.id)
                 example_map.setdefault(key, tokenizer(doc.all_text))
+                context_list.append(doc.all_text)
             except ValueError as e:
                 logging.warning(f'Skipping {document.id} ({e})')
                 continue
             sents = example_map[key]
-            
+
             '''len_doc.append(len(sents))
             sents_len = list(len(k) for k in sents)
             len_sents.append(np.mean(sents_len))  '''

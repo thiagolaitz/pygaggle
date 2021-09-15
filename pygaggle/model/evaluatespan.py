@@ -100,11 +100,11 @@ class PrecisionAccumulator(TruncatingMixin, MeanAccumulator):
         if sum_score > 0:
             self.scores.append((rel_list & gold_rels).sum() / sum_score)
 
-'''
+
 @register_metric('precision@1')
 class PrecisionAt1Metric(TopkMixin, PrecisionAccumulator):
     top_k = 1
-'''
+
 
 @register_metric('precision@2')
 class PrecisionAt2Metric(TopkMixin, PrecisionAccumulator):
@@ -178,19 +178,22 @@ class RerankerSpanEvaluator:
     def evaluate(self,
                  examples: List[RelevanceExample], threshold: float) -> List[MetricAccumulator]:
         metrics = [cls() for cls in self.metrics]
-        senticizer = SpacySenticizer()
-        
+
         for example in tqdm(examples, disable=not self.use_tqdm):
-            context_split = example.context.split(' ')
+            context = ''
 
-            if (len(context_split) > 15000):
-              continue
+            for s in example.documents:
+                context += s.text
 
-            rel_map = self.reranker.rescore(example.query, example.context, threshold, top_n = 2)
+            if (len(context) > 100000):
+                print("oi")
+                continue
+            
+            rel_map = self.reranker.rescore(example.query, example.documents, threshold, top_n = 2)
 
             if len(example.labels) != len(rel_map):
-                print("ruim")
-                print(len(senticizer(example.context)))
+                print(len(rel_map))
+                print(len(example.labels))
                 continue
 
             for metric in metrics:
