@@ -171,7 +171,7 @@ def construct_albert(options: SquadEvaluationOptions) -> Reranker:
                     options.model, from_tf=True)
     device = torch.device(options.device)
     model = model.to(device).eval()
-    tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    tokenizer = AutoTokenizer.from_pretrained(options.model)
     
     return AlbertReranker(model, tokenizer)
 
